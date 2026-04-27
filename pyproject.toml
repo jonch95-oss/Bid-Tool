@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=70.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "amazon-renewed-tool"
+version = "0.1.0"
+description = "CSV enrichment tool for Amazon Renewed workflows using Keepa + SP-API."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "requests>=2.32.3",
+  "requests-aws4auth>=1.3.1",
+]
+
+[project.scripts]
+renewed-tool = "renewed_tool.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
