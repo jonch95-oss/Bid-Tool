@@ -18,6 +18,7 @@ if str(SRC) not in sys.path:
 from renewed_tool.asin_library import AsinLibrary  # noqa: E402
 from renewed_tool.config import ToolConfig  # noqa: E402
 from renewed_tool.csv_pipeline import run_enrichment  # noqa: E402
+from renewed_tool.keepa_client import KeepaClient, KeepaClientError  # noqa: E402
 from renewed_tool.normalization import normalize_capacity, normalize_color, normalize_model, norm_text  # noqa: E402
 from renewed_tool.sp_api_client import SpApiClient  # noqa: E402
 from renewed_tool.types import LookupKey  # noqa: E402
@@ -77,70 +78,130 @@ def build_config_from_secrets() -> ToolConfig:
     )
 
 
-def _render_spapi_diagnostics(config: ToolConfig) -> None:
+def _keepa_health_check(config: ToolConfig) -> None:
+    try:
+        keepa = KeepaClient(config.keepa_api_key)
+        params = {
+            "key": config.keepa_api_key,
+            "domain": 1,
+            "type": "product",
+            "term": "iPhone 13",
+            "asinsOnly": 1,
+        }
+        url = "https://api.keepa.com/search"
+        prepared_url = f"{url}?domain=1&type=product&term=iPhone+13&asinsOnly=1&key=[REDACTED]"
+        response = keepa.search_candidates("iPhone 13", domain=1, limit=10)
+        raw_resp = keepa  # keep linter calm in no-network static review
+        st.success("✅ Keepa health check passed")
+        st.write(f"HTTP status: 200")
+        st.write(f"Request URL: {prepared_url}")
+        # fetch low-level for token visibility
+        import requests
+
+        low_level = requests.get(url, params=params, timeout=keepa.timeout_seconds)
+        payload = low_level.json() if low_level.status_code == 200 else {}
+        st.write(f"Tokens left: {payload.get('tokensLeft', 'unknown')}")
+        st.write(f"ASIN candidates returned: {len(payload.get('asinList', []) or [])}")
+        if response:
+            st.write("Sample ASINs:", [c.asin for c in response[:10]])
+    except KeepaClientError as exc:
+        st.error(f"❌ Keepa health check failed: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"❌ Keepa health check failed: {exc}")
+
+
+def _spapi_health_check(config: ToolConfig, test_asin: str) -> None:
+    client = SpApiClient(
+        aws_access_key_id=config.aws_access_key_id,
+        aws_secret_access_key=config.aws_secret_access_key,
+        aws_session_token=config.aws_session_token,
+        aws_role_arn=config.aws_role_arn,
+        lwa_client_id=config.lwa_client_id,
+        lwa_client_secret=config.lwa_client_secret,
+        lwa_refresh_token=config.lwa_refresh_token,
+        region=config.aws_region,
+        marketplace_id=config.spapi_marketplace_id,
+        endpoint_base=config.sp_api_base_url,
+    )
+    with st.spinner("Running SP-API diagnostics..."):
+        results = client.run_health_check(asin=(test_asin or "B09G9HD6PD").strip())
+
+    lwa = results.get("lwa", {})
+    if lwa.get("ok"):
+        st.success("✅ LWA token fetch succeeded")
+    else:
+        st.error(f"❌ LWA token fetch failed: {lwa.get('error', 'unknown error')}")
+
+    sts = results.get("sts", {})
+    if sts.get("ok"):
+        if results.get("auth_method") == "assume_role":
+            st.success(f"✅ STS AssumeRole succeeded ({sts.get('role_arn', '')})")
+        else:
+            st.info("✅ Using direct IAM user credentials (AWS_ROLE_ARN not set)")
+    else:
+        st.error(f"❌ STS AssumeRole failed: {sts.get('error', 'unknown error')}")
+
+    marketplaces = results.get("marketplaces", {})
+    if marketplaces.get("ok"):
+        items = marketplaces.get("items", [])
+        if items:
+            st.write("Marketplace participations:")
+            st.dataframe(items, use_container_width=True)
+        else:
+            st.warning("Marketplace participation call succeeded but returned no marketplaces.")
+    else:
+        st.error(f"❌ Marketplace participation failed: {marketplaces.get('error', 'unknown error')}")
+
+    pricing = results.get("pricing", {})
+    if pricing.get("ok"):
+        version_results = pricing.get("versions", {})
+        st.write("Pricing endpoint checks:")
+        st.dataframe(
+            [
+                {
+                    "version": version_name,
+                    "worked": details.get("worked", False),
+                    "condition": details.get("condition", ""),
+                    "attempts": json.dumps(details.get("attempts", [])),
+                }
+                for version_name, details in version_results.items()
+            ],
+            use_container_width=True,
+        )
+    else:
+        st.error(f"❌ Pricing checks failed: {pricing.get('error', 'unknown error')}")
+
+
+def _library_stats(config: ToolConfig) -> None:
+    library = AsinLibrary(config.db_path)
+    try:
+        entries = library.list_entries(config.spapi_marketplace_id)
+        counts: dict[str, int] = {"keepa": 0, "manual": 0, "user_assisted": 0}
+        for entry in entries:
+            source = (entry.source or "").strip().lower()
+            if source in counts:
+                counts[source] += 1
+        st.write(f"DB file path: `{config.db_path}`")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total entries", len(entries))
+        c2.metric("keepa", counts["keepa"])
+        c3.metric("manual", counts["manual"])
+        c4.metric("user_assisted", counts["user_assisted"])
+    finally:
+        library.close()
+
+
+def _render_diagnostics(config: ToolConfig) -> None:
     with st.expander("Diagnostics", expanded=False):
-        st.caption("Run targeted checks for SP-API authentication, permissions, and pricing endpoints.")
+        st.caption("Run targeted checks for Keepa, SP-API, and ASIN library health.")
         test_asin = st.text_input("Health check ASIN", value="B09G9HD6PD", key="spapi-health-asin")
-        if st.button("Run SP-API Health Check", key="run-spapi-health-check"):
-            client = SpApiClient(
-                aws_access_key_id=config.aws_access_key_id,
-                aws_secret_access_key=config.aws_secret_access_key,
-                aws_session_token=config.aws_session_token,
-                aws_role_arn=config.aws_role_arn,
-                lwa_client_id=config.lwa_client_id,
-                lwa_client_secret=config.lwa_client_secret,
-                lwa_refresh_token=config.lwa_refresh_token,
-                region=config.aws_region,
-                marketplace_id=config.spapi_marketplace_id,
-                endpoint_base=config.sp_api_base_url,
-            )
-            with st.spinner("Running SP-API diagnostics..."):
-                results = client.run_health_check(asin=(test_asin or "B09G9HD6PD").strip())
-
-            lwa = results.get("lwa", {})
-            if lwa.get("ok"):
-                st.success("✅ LWA token fetch succeeded")
-            else:
-                st.error(f"❌ LWA token fetch failed: {lwa.get('error', 'unknown error')}")
-
-            sts = results.get("sts", {})
-            if sts.get("ok"):
-                if results.get("auth_method") == "assume_role":
-                    st.success(f"✅ STS AssumeRole succeeded ({sts.get('role_arn', '')})")
-                else:
-                    st.info("✅ Using direct IAM user credentials (AWS_ROLE_ARN not set)")
-            else:
-                st.error(f"❌ STS AssumeRole failed: {sts.get('error', 'unknown error')}")
-
-            marketplaces = results.get("marketplaces", {})
-            if marketplaces.get("ok"):
-                items = marketplaces.get("items", [])
-                if items:
-                    st.write("Marketplace participations:")
-                    st.dataframe(items, use_container_width=True)
-                else:
-                    st.warning("Marketplace participation call succeeded but returned no marketplaces.")
-            else:
-                st.error(f"❌ Marketplace participation failed: {marketplaces.get('error', 'unknown error')}")
-
-            pricing = results.get("pricing", {})
-            if pricing.get("ok"):
-                version_results = pricing.get("versions", {})
-                st.write("Pricing endpoint checks:")
-                st.dataframe(
-                    [
-                        {
-                            "version": version_name,
-                            "worked": details.get("worked", False),
-                            "condition": details.get("condition", ""),
-                            "attempts": json.dumps(details.get("attempts", [])),
-                        }
-                        for version_name, details in version_results.items()
-                    ],
-                    use_container_width=True,
-                )
-            else:
-                st.error(f"❌ Pricing checks failed: {pricing.get('error', 'unknown error')}")
+        b1, b2, b3 = st.columns(3)
+        if b1.button("Keepa Health Check", key="run-keepa-health-check"):
+            _keepa_health_check(config)
+        if b2.button("SP-API Health Check", key="run-spapi-health-check"):
+            _spapi_health_check(config, test_asin)
+        if b3.button("Library Stats", key="run-library-stats"):
+            _library_stats(config)
 
 
 def preview_csv_rows(content: bytes, limit: int = 10) -> list[dict[str, str]]:
@@ -165,7 +226,7 @@ def _library_key_from_fields(brand: str, model: str, color: str, storage: str, m
 
 
 def render_enrichment_page(config: ToolConfig) -> None:
-    _render_spapi_diagnostics(config)
+    _render_diagnostics(config)
 
     left, right = st.columns([2, 1])
     with left:

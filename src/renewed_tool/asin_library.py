@@ -252,6 +252,22 @@ class AsinLibrary:
             for row in rows
         ]
 
+    def source_breakdown(self, marketplace_id: str) -> dict[str, int]:
+        rows = self._conn.execute(
+            """
+            SELECT source, COUNT(*) AS count
+            FROM asin_library
+            WHERE marketplace_id = ?
+            GROUP BY source
+            """,
+            (marketplace_id,),
+        ).fetchall()
+        breakdown: dict[str, int] = {}
+        for row in rows:
+            key = str(row["source"] or "").strip().lower() or "unknown"
+            breakdown[key] = int(row["count"] or 0)
+        return breakdown
+
     def upsert_manual_entry(
         self,
         *,

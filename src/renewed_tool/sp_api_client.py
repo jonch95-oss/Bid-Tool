@@ -322,6 +322,22 @@ class SpApiClient:
             results["pricing"] = {"ok": False, "error": str(exc)}
         return results
 
+    def test_lwa_token(self) -> dict[str, Any]:
+        try:
+            self._get_lwa_access_token()
+            return {"ok": True}
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
+
+    def test_sts_mode(self) -> dict[str, Any]:
+        if self._aws_role_arn:
+            try:
+                self._assume_role_credentials()
+                return {"ok": True, "method": "AssumeRole", "role_arn": self._aws_role_arn}
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "method": "AssumeRole", "role_arn": self._aws_role_arn, "error": str(exc)}
+        return {"ok": True, "method": "IAM-direct"}
+
     def _pricing_v2022_single_get(self, asin: str, condition: str) -> requests.Response:
         return self._sp_request(
             "GET",
@@ -454,6 +470,7 @@ class SpApiClient:
             total_offers=total_offers,
             currency=currency,
             condition=condition,
+            condition_tier_used=None,
             raw=payload,
         )
 

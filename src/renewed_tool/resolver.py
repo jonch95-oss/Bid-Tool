@@ -244,7 +244,7 @@ class AsinResolver:
     ) -> ResolvedRow:
         catalog = self.sp_api_client.get_catalog_item(asin)
         pricing = self.sp_api_client.get_pricing(asin)
-        requested_grade_tier = self._requested_grade_tier(normalize_grade(spec.grade))
+        requested_grade_tier = self._requested_grade_tier(spec.grade)
         grade_matched_price = self._price_for_grade_tier(pricing, requested_grade_tier)
         price_choice = (
             grade_matched_price
@@ -260,6 +260,32 @@ class AsinResolver:
         merged_reason = match.reason
         if extra_notes:
             merged_reason = ", ".join([merged_reason, *extra_notes]) if merged_reason else ", ".join(extra_notes)
+
+        if requested_grade_tier and grade_matched_price is None:
+            merged_reason = (
+                f"{merged_reason}, no price found for requested grade tier '{requested_grade_tier}'"
+                if merged_reason
+                else f"no price found for requested grade tier '{requested_grade_tier}'"
+            )
+            return ResolvedRow(
+                input_row=row,
+                resolved_asin=asin,
+                price=price_choice,
+                currency=pricing.currency,
+                source=source,
+                confidence=0.0,
+                status="unresolved-no-price-for-tier",
+                notes=merged_reason,
+                library_hit=library_hit,
+                excellent_price=pricing.excellent_price,
+                good_price=pricing.good_price,
+                acceptable_price=pricing.acceptable_price,
+                lowest_fba=pricing.lowest_fba,
+                lowest_fbm=pricing.lowest_fbm,
+                buy_box=pricing.buy_box,
+                total_offers=pricing.total_offers,
+                condition_tier_used=requested_grade_tier,
+            )
 
         if not match.valid:
             return ResolvedRow(
@@ -279,6 +305,7 @@ class AsinResolver:
                 lowest_fbm=pricing.lowest_fbm,
                 buy_box=pricing.buy_box,
                 total_offers=pricing.total_offers,
+                condition_tier_used=requested_grade_tier,
             )
 
         return ResolvedRow(
@@ -298,6 +325,7 @@ class AsinResolver:
             lowest_fbm=pricing.lowest_fbm,
             buy_box=pricing.buy_box,
             total_offers=pricing.total_offers,
+            condition_tier_used=requested_grade_tier,
         )
 
     @staticmethod
@@ -431,7 +459,20 @@ class AsinResolver:
         return MatchResult(True, final, reason)
 
     @staticmethod
-    def _requested_grade_tier(normalized_grade: str) -> str | None:
+    def _requested_grade_tier(raw_grade: str) -> str | None:
+        grade_text = (raw_grade or "").strip().upper().replace(" ", "")
+        # Requested mapping:
+        # - Anything above B+ -> Excellent
+        # - B+ -> Good
+        # - C, C+ -> Acceptable
+        if grade_text in {"A", "A+", "A-"}:
+            return "excellent"
+        if grade_text == "B+":
+            return "good"
+        if grade_text in {"C", "C+"}:
+            return "acceptable"
+
+        normalized_grade = normalize_grade(raw_grade)
         return {
             "A": "excellent",
             "B": "excellent",

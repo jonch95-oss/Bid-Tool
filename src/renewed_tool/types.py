@@ -70,6 +70,7 @@ class PriceSnapshot:
     lowest_fbm: float | None
     buy_box: float | None
     total_offers: int
+    condition_tier_used: str | None
     currency: str | None
     condition: str | None
     raw: dict[str, Any]
@@ -130,6 +131,7 @@ class ResolvedRow:
     lowest_fbm: float | None = None
     buy_box: float | None = None
     total_offers: int = 0
+    condition_tier_used: str | None = None
 
 
 @dataclass(slots=True)
