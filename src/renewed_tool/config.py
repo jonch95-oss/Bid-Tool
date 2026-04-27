@@ -9,7 +9,7 @@ from pathlib import Path
 class ToolConfig:
     keepa_api_key: str
     keepa_domain: int
-    amazon_marketplace_id: str
+    spapi_marketplace_id: str
     aws_region: str
     aws_access_key_id: str
     aws_secret_access_key: str
@@ -48,7 +48,7 @@ def load_config() -> ToolConfig:
     return ToolConfig(
         keepa_api_key=_required("KEEPA_API_KEY"),
         keepa_domain=int(os.getenv("KEEPA_DOMAIN", "1")),
-        amazon_marketplace_id=os.getenv("SPAPI_MARKETPLACE_ID", "ATVPDKIKX0DER"),
+        spapi_marketplace_id=os.getenv("SPAPI_MARKETPLACE_ID", "ATVPDKIKX0DER"),
         aws_region=os.getenv("AWS_REGION", "us-east-1"),
         aws_access_key_id=_required("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=_required("AWS_SECRET_ACCESS_KEY"),

@@ -53,7 +53,7 @@ def build_config_from_secrets() -> ToolConfig:
     return ToolConfig(
         keepa_api_key=_required_secret("KEEPA_API_KEY"),
         keepa_domain=int(_secret_get("KEEPA_DOMAIN", "1") or "1"),
-        amazon_marketplace_id=_secret_get("SPAPI_MARKETPLACE_ID", "ATVPDKIKX0DER") or "ATVPDKIKX0DER",
+        spapi_marketplace_id=_secret_get("SPAPI_MARKETPLACE_ID", "ATVPDKIKX0DER") or "ATVPDKIKX0DER",
         aws_region=_secret_get("AWS_REGION", "us-east-1") or "us-east-1",
         aws_access_key_id=_required_secret("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=_required_secret("AWS_SECRET_ACCESS_KEY"),

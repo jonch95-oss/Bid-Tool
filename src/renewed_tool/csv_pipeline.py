@@ -83,18 +83,18 @@ def run_enrichment(config: ToolConfig, input_csv: Path, output_csv: Path) -> Pro
         aws_access_key_id=config.aws_access_key_id,
         aws_secret_access_key=config.aws_secret_access_key,
         aws_session_token=config.aws_session_token,
-        lwa_client_id=config.sp_api_client_id,
-        lwa_client_secret=config.sp_api_client_secret,
-        lwa_refresh_token=config.sp_api_refresh_token,
+        lwa_client_id=config.lwa_client_id,
+        lwa_client_secret=config.lwa_client_secret,
+        lwa_refresh_token=config.lwa_refresh_token,
         region=config.aws_region,
-        marketplace_id=config.amazon_marketplace_id,
+        marketplace_id=config.spapi_marketplace_id,
         endpoint_base=config.sp_api_base_url,
     )
     resolver = AsinResolver(
         library=library,
         keepa=keepa,
         sp_api=sp_api,
-        marketplace_id=config.amazon_marketplace_id,
+        marketplace_id=config.spapi_marketplace_id,
         keepa_domain=config.keepa_domain,
         candidate_limit=config.candidate_limit,
     )
