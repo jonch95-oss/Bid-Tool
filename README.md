@@ -88,3 +88,41 @@ The output CSV contains:
 - Grade validation is based on condition/subcondition text from SP-API offers.
 - Keepa and catalog fields can vary by category; if your category needs custom
   parsing rules, extend `normalization.py` and `resolver.py`.
+
+## Deploy on Streamlit Community Cloud
+
+This repository now includes a Streamlit entry file at:
+
+- `streamlit_app.py`
+
+### Streamlit deploy settings
+
+- **Repository**: your GitHub repo
+- **Branch**: `cursor/renewed-asin-tool-4020` (or merge to `main` first)
+- **Main file path**: `streamlit_app.py`
+
+### Required secrets in Streamlit
+
+In app settings -> **Secrets**, define:
+
+```toml
+KEEPA_API_KEY = "..."
+LWA_CLIENT_ID = "..."
+LWA_CLIENT_SECRET = "..."
+LWA_REFRESH_TOKEN = "..."
+AWS_ACCESS_KEY_ID = "..."
+AWS_SECRET_ACCESS_KEY = "..."
+AWS_REGION = "us-east-1"
+SPAPI_MARKETPLACE_ID = "ATVPDKIKX0DER"
+```
+
+Optional:
+
+```toml
+AWS_SESSION_TOKEN = "..."
+KEEPA_DOMAIN = "1"
+CANDIDATE_LIMIT = "25"
+ASIN_LIBRARY_PATH = "./asin_library.db"
+```
+
+Then deploy and upload your CSV in the web app UI.
