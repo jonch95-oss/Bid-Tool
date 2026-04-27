@@ -7,6 +7,7 @@ from pathlib import Path
 from .asin_library import AsinLibrary
 from .config import ToolConfig
 from .keepa_client import KeepaClient
+from .normalization import normalize_color
 from .resolver import AsinResolver
 from .sp_api_client import SpApiClient
 from .types import InventoryRow, ProcessSummary, ResolvedRow
@@ -34,6 +35,62 @@ def _extract_capacity_from_text(text: str) -> str:
     return f"{number}{unit}"
 
 
+def _extract_brand_from_text(text: str) -> str:
+    candidates = (
+        "apple",
+        "samsung",
+        "google",
+        "motorola",
+        "oneplus",
+        "nokia",
+        "sony",
+        "lg",
+        "xiaomi",
+    )
+    lowered = (text or "").lower()
+    for brand in candidates:
+        if re.search(rf"\b{re.escape(brand)}\b", lowered):
+            return brand.title()
+    return ""
+
+
+def _extract_color_from_text(text: str) -> str:
+    lowered = (text or "").lower()
+    # include full names and common short codes frequently seen in lot sheets
+    candidates = (
+        "black",
+        "blk",
+        "bk",
+        "gray",
+        "grey",
+        "gry",
+        "gr",
+        "gra",
+        "blue",
+        "blu",
+        "bl",
+        "white",
+        "wht",
+        "wt",
+        "red",
+        "gold",
+        "gld",
+        "silver",
+        "slv",
+        "sil",
+        "green",
+        "grn",
+        "purple",
+        "pur",
+        "pink",
+        "pnk",
+    )
+    for color in candidates:
+        if re.search(rf"\b{re.escape(color)}\b", lowered):
+            return normalize_color(color)
+    return ""
+
+
 def load_input_rows(path: Path) -> list[InventoryRow]:
     rows: list[InventoryRow] = []
     with path.open("r", encoding="utf-8", newline="") as infile:
@@ -44,13 +101,19 @@ def load_input_rows(path: Path) -> list[InventoryRow]:
             capacity = _pick_cell(row, "capacity", "cpacity")
             if not capacity:
                 capacity = _extract_capacity_from_text(title)
+            brand = _pick_cell(row, "brand", "oem")
+            if not brand:
+                brand = _extract_brand_from_text(title)
+            color = _pick_cell(row, "color")
+            if not color:
+                color = _extract_color_from_text(title)
             rows.append(
                 InventoryRow(
                     sku=_pick_cell(row, "sku", "lot #", "lot#", "lot number", "lot"),
                     title=title,
-                    brand=_pick_cell(row, "brand", "oem"),
+                    brand=brand,
                     model=_pick_cell(row, "model"),
-                    color=_pick_cell(row, "color"),
+                    color=color,
                     capacity=capacity,
                     carrier=_pick_cell(row, "carrier"),
                     us_spec=_pick_cell(row, "us spec", "us_spec", "usspec"),

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 from .asin_library import AsinLibrary
 from .keepa_client import KeepaClient, KeepaClientError
 from .normalization import normalize_capacity, normalize_color, normalize_grade, normalize_model, norm_text
 from .sp_api_client import SpApiClient, SpApiClientError
 from .types import InventoryRow, LookupKey, MatchResult, PriceSnapshot, ProductSpec, ResolvedRow
+
+LOGGER = logging.getLogger(__name__)
 
 
 class AsinResolver:
@@ -239,7 +243,22 @@ class AsinResolver:
         cat_capacity = normalize_capacity(found_capacity)
         offer_grade = normalize_grade(pricing.condition)
 
+        LOGGER.warning(
+            "Validation input vs candidate | brand=%s model=%s color=%s capacity=%s grade=%s || "
+            "cand_model=%s cand_color=%s cand_capacity=%s cand_grade=%s",
+            req_brand or "<missing>",
+            req_model or "<missing>",
+            req_color or "<missing>",
+            req_capacity or "<missing>",
+            req_grade or "<missing>",
+            cat_model or "<missing>",
+            cat_color or "<missing>",
+            cat_capacity or "<missing>",
+            offer_grade or "<missing>",
+        )
+
         if req_model and req_model != cat_model:
+            LOGGER.warning("Validation failed field=model expected=%s actual=%s", req_model, cat_model)
             return MatchResult(False, 0.0, f"Model mismatch: expected '{req_model}', got '{cat_model}'")
 
         score = 0.55
@@ -250,24 +269,36 @@ class AsinResolver:
 
         if req_color:
             if req_color != cat_color:
+                LOGGER.warning("Validation failed field=color expected=%s actual=%s", req_color, cat_color)
                 return MatchResult(False, 0.0, f"Color mismatch: expected '{req_color}', got '{cat_color}'")
             score += 0.15
             reasons.append("color matched")
+        else:
+            score -= 0.08
+            reasons.append("color not verified")
 
         if req_capacity:
             if req_capacity != cat_capacity:
+                LOGGER.warning("Validation failed field=capacity expected=%s actual=%s", req_capacity, cat_capacity)
                 return MatchResult(False, 0.0, f"Capacity mismatch: expected '{req_capacity}', got '{cat_capacity}'")
             score += 0.2
             reasons.append("capacity matched")
+        else:
+            score -= 0.1
+            reasons.append("capacity not verified")
 
         if req_grade:
             if offer_grade and req_grade != offer_grade:
+                LOGGER.warning("Validation failed field=grade expected=%s actual=%s", req_grade, offer_grade)
                 return MatchResult(False, 0.0, f"Grade mismatch: expected '{req_grade}', got '{offer_grade}'")
             if offer_grade:
                 score += 0.1
                 reasons.append("grade matched")
             else:
                 reasons.append("grade unavailable from offers")
+        else:
+            score -= 0.05
+            reasons.append("grade not verified")
 
         title_boost = 0.0
         if norm_text(found_model) and norm_text(requested.model) and norm_text(found_model) == norm_text(requested.model):
