@@ -33,9 +33,8 @@ class KeepaClient:
         search_params = {
             "key": self.api_key,
             "domain": domain,
-            "type": "product",
             "term": query,
-            "asinsOnly": 1,
+            "asinsOnly": "1",
         }
         self._log_request("GET", search_url, search_params)
         resp = requests.get(search_url, params=search_params, timeout=self.timeout_seconds)
@@ -48,7 +47,12 @@ class KeepaClient:
         if resp.status_code != 200:
             raise KeepaClientError(f"Keepa search failed ({resp.status_code}): {resp.text[:300]}")
         payload = resp.json()
-        asin_list = payload.get("asinList", [])[: max(limit, 1)]
+        asin_list = payload.get("asinList", [])
+        if not asin_list:
+            products = payload.get("products")
+            if isinstance(products, list):
+                asin_list = [str(p.get("asin", "")).strip() for p in products if isinstance(p, dict)]
+        asin_list = [asin for asin in asin_list if asin][: max(limit, 1)]
         if not asin_list:
             return []
         return self.get_candidates(asin_list, domain=domain)
@@ -59,7 +63,6 @@ class KeepaClient:
             "title": query,
             "perPage": max(limit, 1),
             "page": 0,
-            "sort": ["current_SALES", "asc"],
         }
         params = {
             "key": self.api_key,

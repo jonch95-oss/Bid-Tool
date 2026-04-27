@@ -116,6 +116,14 @@ The app supports:
 - Progress bar while enrichment runs
 - Result preview table
 - Download button for enriched CSV
+- ASIN Library management page with:
+  - filter by brand
+  - search by model/ASIN/color
+  - manual add
+  - lock/unlock
+  - edit/delete
+  - export/import backups (JSON and CSV)
+  - clear library
 
 ### Run Streamlit locally
 
@@ -158,6 +166,18 @@ ASIN_LIBRARY_PATH = "/tmp/asin_library.db"
 ```
 
 The Streamlit app reads credentials from `st.secrets` directly.
+
+## ASIN Library behavior
+
+- Library is persisted in SQLite (`ASIN_LIBRARY_PATH`, default `/tmp/asin_library.db` in Streamlit).
+- Enrichment checks the ASIN Library first using normalized key:
+  - brand + model + color + storage(capacity)
+- If library match exists, row source is `library` and Keepa call is skipped.
+- If Keepa finds a new match, row is auto-added to library as unlocked.
+- Locked entries are never overwritten by auto updates.
+- If Keepa finds a different ASIN for a locked key, row is marked:
+  - status: `conflict`
+  - note: `Locked library entry has ASIN X, Keepa returned ASIN Y`
 
 ## Keepa troubleshooting notes
 

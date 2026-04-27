@@ -35,7 +35,10 @@ def _run_enrich(args: argparse.Namespace) -> None:
     )
     print(
         f"Processed {summary.total_rows} rows, resolved {summary.resolved_rows}, "
-        f"unresolved {summary.unresolved_rows}. Output: {args.output}"
+        f"unresolved {summary.unresolved_rows}. "
+        f"Library hits {summary.library_hits}, keepa matches {summary.keepa_resolved}, "
+        f"conflicts {summary.conflicts}, skipped {summary.skipped}. "
+        f"Output: {args.output}"
     )
     if args.summary_json:
         payload = {

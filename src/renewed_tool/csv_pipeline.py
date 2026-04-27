@@ -52,6 +52,8 @@ def load_input_rows(path: Path) -> list[InventoryRow]:
                     model=_pick_cell(row, "model"),
                     color=_pick_cell(row, "color"),
                     capacity=capacity,
+                    carrier=_pick_cell(row, "carrier"),
+                    us_spec=_pick_cell(row, "us spec", "us_spec", "usspec"),
                     grade=_pick_cell(row, "grade"),
                     asin_hint=_pick_cell(row, "asin", "asin hint", "asinhint"),
                     raw=row,
@@ -68,6 +70,8 @@ def write_output_rows(path: Path, rows: list[ResolvedRow]) -> None:
         "model",
         "color",
         "capacity",
+        "carrier",
+        "us_spec",
         "grade",
         "asin_hint",
         "resolved_asin",
@@ -90,6 +94,8 @@ def write_output_rows(path: Path, rows: list[ResolvedRow]) -> None:
                     "model": row.input_row.model,
                     "color": row.input_row.color,
                     "capacity": row.input_row.capacity,
+                    "carrier": row.input_row.carrier,
+                    "us_spec": row.input_row.us_spec,
                     "grade": row.input_row.grade,
                     "asin_hint": row.input_row.asin_hint,
                     "resolved_asin": row.resolved_asin,
@@ -99,6 +105,7 @@ def write_output_rows(path: Path, rows: list[ResolvedRow]) -> None:
                     "confidence": f"{row.confidence:.2f}",
                     "status": row.status,
                     "notes": row.notes,
+                    "library_hit": "yes" if row.library_hit else "no",
                 }
             )
 
@@ -135,5 +142,17 @@ def run_enrichment(config: ToolConfig, input_csv: Path, output_csv: Path) -> Pro
     total = len(enriched)
     resolved = sum(1 for row in enriched if row.status == "ok")
     unresolved = total - resolved
-    return ProcessSummary(total_rows=total, resolved_rows=resolved, unresolved_rows=unresolved)
+    library_hits = sum(1 for row in enriched if row.source == "library")
+    keepa_resolved = sum(1 for row in enriched if row.source == "keepa+spapi")
+    conflicts = sum(1 for row in enriched if row.status == "conflict")
+    skipped = sum(1 for row in enriched if row.status == "skipped")
+    return ProcessSummary(
+        total_rows=total,
+        resolved_rows=resolved,
+        unresolved_rows=unresolved,
+        library_hits=library_hits,
+        keepa_resolved=keepa_resolved,
+        conflicts=conflicts,
+        skipped=skipped,
+    )
 

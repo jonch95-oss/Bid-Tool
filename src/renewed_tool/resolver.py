@@ -4,7 +4,7 @@ from .asin_library import AsinLibrary
 from .keepa_client import KeepaClient, KeepaClientError
 from .normalization import normalize_capacity, normalize_color, normalize_grade, normalize_model, norm_text
 from .sp_api_client import SpApiClient, SpApiClientError
-from .types import AsinLibraryRecord, InventoryRow, LookupKey, MatchResult, PriceSnapshot, ProductSpec, ResolvedRow
+from .types import InventoryRow, LookupKey, MatchResult, PriceSnapshot, ProductSpec, ResolvedRow
 
 
 class AsinResolver:
@@ -36,47 +36,50 @@ class AsinResolver:
                 confidence=0.0,
                 status="skipped",
                 notes="Skipped row: missing model/title/brand",
+                library_hit=False,
             )
 
         key = self._lookup_key(row, self.marketplace_id)
         spec = ProductSpec(
+            brand=row.brand,
             model=row.model,
             color=row.color,
             capacity=row.capacity,
             grade=row.grade,
         )
 
+        # Library comes first for cache-hit behavior.
+        cached = self.asin_library.get(key)
+        if cached:
+            try:
+                cached_result = self._resolve_from_asin(row, spec, cached.asin, "library", library_hit=True)
+                if cached_result.status == "ok":
+                    return cached_result
+            except SpApiClientError:
+                # Keepa fallback can still recover from stale library entries.
+                pass
+
         if row.asin_hint:
             try:
                 hinted = self._resolve_from_asin(row, spec, row.asin_hint, "csv_hint+spapi")
                 if hinted.status == "ok":
-                    self.asin_library.upsert(
-                        AsinLibraryRecord(
-                            key_model=key.model,
-                            key_color=key.color,
-                            key_capacity=key.capacity,
-                            key_grade=key.grade,
-                            marketplace_id=key.marketplace_id,
-                            asin=hinted.resolved_asin or "",
-                            confidence=hinted.confidence,
-                            source=hinted.source,
-                            raw_title=row.title,
-                        )
+                    self.asin_library.upsert_auto(
+                        key=key,
+                        brand=row.brand,
+                        model=row.model,
+                        color=row.color,
+                        storage=row.capacity,
+                        carrier=row.carrier,
+                        us_spec=row.us_spec,
+                        asin=hinted.resolved_asin or "",
+                        confidence=hinted.confidence,
+                        source=hinted.source,
+                        raw_title=row.title,
                     )
                     return hinted
             except SpApiClientError:
                 # Treat CSV hints as optional and continue with normal flow.
                 pass
-
-        cached = self.asin_library.get(key)
-        if cached:
-            try:
-                cached_result = self._resolve_from_asin(row, spec, cached.asin, "library")
-                if cached_result.status == "ok":
-                    return cached_result
-            except SpApiClientError as exc:
-                # Keepa fallback can still recover from stale cache entries.
-                _ = exc
 
         try:
             query = " ".join(
@@ -97,6 +100,7 @@ class AsinResolver:
                 confidence=0.0,
                 status="error",
                 notes=f"Keepa request failed: {exc}",
+                library_hit=False,
             )
 
         if not keepa_candidates:
@@ -109,6 +113,7 @@ class AsinResolver:
                 confidence=0.0,
                 status="unresolved",
                 notes="No Keepa candidates found",
+                library_hit=False,
             )
 
         best: ResolvedRow | None = None
@@ -133,21 +138,37 @@ class AsinResolver:
                 confidence=0.0,
                 status="unresolved",
                 notes="No candidate passed model/color/capacity/grade validation",
+                library_hit=False,
             )
 
-        self.asin_library.upsert(
-            AsinLibraryRecord(
-                key_model=key.model,
-                key_color=key.color,
-                key_capacity=key.capacity,
-                key_grade=key.grade,
-                marketplace_id=key.marketplace_id,
-                asin=best.resolved_asin or "",
-                confidence=best.confidence,
-                source=best.source,
-                raw_title=row.title,
-            )
+        upsert_result = self.asin_library.upsert_auto(
+            key=key,
+            brand=row.brand,
+            model=row.model,
+            color=row.color,
+            storage=row.capacity,
+            carrier=row.carrier,
+            us_spec=row.us_spec,
+            asin=best.resolved_asin or "",
+            confidence=best.confidence,
+            source=best.source,
+            raw_title=row.title,
         )
+        if upsert_result.action == "conflict":
+            return ResolvedRow(
+                input_row=row,
+                resolved_asin=best.resolved_asin,
+                price=best.price,
+                currency=best.currency,
+                source=best.source,
+                confidence=best.confidence,
+                status="conflict",
+                notes=(
+                    f"Locked library entry has ASIN {upsert_result.conflict_asin}, "
+                    f"Keepa returned ASIN {best.resolved_asin}"
+                ),
+                library_hit=False,
+            )
         return best
 
     def _resolve_from_asin(
@@ -156,6 +177,7 @@ class AsinResolver:
         spec: ProductSpec,
         asin: str,
         source: str,
+        library_hit: bool = False,
     ) -> ResolvedRow:
         catalog = self.sp_api_client.get_catalog_item(asin)
         pricing = self.sp_api_client.get_pricing(asin)
@@ -171,6 +193,7 @@ class AsinResolver:
                 confidence=0.0,
                 status="unresolved",
                 notes=match.reason,
+                library_hit=library_hit,
             )
 
         return ResolvedRow(
@@ -182,15 +205,16 @@ class AsinResolver:
             confidence=match.score,
             status="ok",
             notes=match.reason,
+            library_hit=library_hit,
         )
 
     @staticmethod
     def _lookup_key(row: InventoryRow, marketplace_id: str) -> LookupKey:
         return LookupKey(
+            brand=norm_text(row.brand),
             model=normalize_model(row.model),
             color=normalize_color(row.color),
-            capacity=normalize_capacity(row.capacity),
-            grade=normalize_grade(row.grade),
+            storage=normalize_capacity(row.capacity),
             marketplace_id=marketplace_id,
         )
 
@@ -202,11 +226,14 @@ class AsinResolver:
         found_capacity: str | None,
         pricing: PriceSnapshot,
     ) -> MatchResult:
+        req_brand = norm_text(requested.brand)
         req_model = normalize_model(requested.model)
         req_color = normalize_color(requested.color)
         req_capacity = normalize_capacity(requested.capacity)
         req_grade = normalize_grade(requested.grade)
 
+        # Brand can be missing from catalog payload. If provided in request we don't
+        # hard fail on absence, but we score it when present in model/title context.
         cat_model = normalize_model(found_model)
         cat_color = normalize_color(found_color)
         cat_capacity = normalize_capacity(found_capacity)
@@ -217,6 +244,9 @@ class AsinResolver:
 
         score = 0.55
         reasons = ["model matched"]
+
+        if req_brand:
+            reasons.append("brand specified")
 
         if req_color:
             if req_color != cat_color:
