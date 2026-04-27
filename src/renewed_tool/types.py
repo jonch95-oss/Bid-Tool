@@ -16,6 +16,8 @@ class InventoryRow:
     us_spec: str
     grade: str
     asin_hint: str
+    capacity_inferred_from_title: bool = False
+    needs_input_capacity: bool = False
     raw: dict[str, str] = field(default_factory=dict)
 
 

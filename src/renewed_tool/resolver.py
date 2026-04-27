@@ -44,6 +44,10 @@ class AsinResolver:
             )
 
         key = self._lookup_key(row, self.marketplace_id)
+        inference_notes: list[str] = []
+        if row.capacity_inferred_from_title:
+            inference_notes.append("capacity inferred from title")
+
         spec = ProductSpec(
             brand=row.brand,
             model=row.model,
@@ -56,7 +60,14 @@ class AsinResolver:
         cached = self.asin_library.get(key)
         if cached:
             try:
-                cached_result = self._resolve_from_asin(row, spec, cached.asin, "library", library_hit=True)
+                cached_result = self._resolve_from_asin(
+                    row,
+                    spec,
+                    cached.asin,
+                    "library",
+                    library_hit=True,
+                    extra_notes=inference_notes,
+                )
                 if cached_result.status == "ok":
                     return cached_result
             except SpApiClientError:
@@ -65,7 +76,13 @@ class AsinResolver:
 
         if row.asin_hint:
             try:
-                hinted = self._resolve_from_asin(row, spec, row.asin_hint, "csv_hint+spapi")
+                hinted = self._resolve_from_asin(
+                    row,
+                    spec,
+                    row.asin_hint,
+                    "csv_hint+spapi",
+                    extra_notes=inference_notes,
+                )
                 if hinted.status == "ok":
                     self.asin_library.upsert_auto(
                         key=key,
@@ -123,7 +140,13 @@ class AsinResolver:
         best: ResolvedRow | None = None
         for candidate in keepa_candidates:
             try:
-                resolved = self._resolve_from_asin(row, spec, candidate.asin, "keepa+spapi")
+                resolved = self._resolve_from_asin(
+                    row,
+                    spec,
+                    candidate.asin,
+                    "keepa+spapi",
+                    extra_notes=inference_notes,
+                )
             except SpApiClientError:
                 continue
 
@@ -182,10 +205,15 @@ class AsinResolver:
         asin: str,
         source: str,
         library_hit: bool = False,
+        extra_notes: list[str] | None = None,
     ) -> ResolvedRow:
         catalog = self.sp_api_client.get_catalog_item(asin)
         pricing = self.sp_api_client.get_pricing(asin)
         match = self._validate(spec, catalog.model, catalog.color, catalog.capacity, pricing)
+
+        merged_reason = match.reason
+        if extra_notes:
+            merged_reason = ", ".join([merged_reason, *extra_notes]) if merged_reason else ", ".join(extra_notes)
 
         if not match.valid:
             return ResolvedRow(
@@ -196,7 +224,7 @@ class AsinResolver:
                 source=source,
                 confidence=0.0,
                 status="unresolved",
-                notes=match.reason,
+                notes=merged_reason,
                 library_hit=library_hit,
             )
 
@@ -208,7 +236,7 @@ class AsinResolver:
             source=source,
             confidence=match.score,
             status="ok",
-            notes=match.reason,
+            notes=merged_reason,
             library_hit=library_hit,
         )
 

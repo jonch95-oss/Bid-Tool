@@ -35,6 +35,17 @@ def _extract_capacity_from_text(text: str) -> str:
     return f"{number}{unit}"
 
 
+def _append_note(raw_row: dict[str, str], note: str) -> None:
+    existing = (raw_row.get("_inference_notes") or "").strip()
+    if not existing:
+        raw_row["_inference_notes"] = note
+        return
+    notes = [part.strip() for part in existing.split(";") if part.strip()]
+    if note not in notes:
+        notes.append(note)
+    raw_row["_inference_notes"] = "; ".join(notes)
+
+
 def _extract_brand_from_text(text: str) -> str:
     candidates = (
         "apple",
@@ -99,14 +110,23 @@ def load_input_rows(path: Path) -> list[InventoryRow]:
             row = {_normalize_header(k or ""): (v or "") for k, v in raw.items()}
             title = _pick_cell(row, "title", "item description", "item_description", "description")
             capacity = _pick_cell(row, "capacity", "cpacity")
+            capacity_inferred_from_title = False
             if not capacity:
-                capacity = _extract_capacity_from_text(title)
+                inferred_capacity = _extract_capacity_from_text(title)
+                if inferred_capacity:
+                    capacity = inferred_capacity
+                    capacity_inferred_from_title = True
+                    _append_note(row, "capacity inferred from title")
             brand = _pick_cell(row, "brand", "oem")
             if not brand:
                 brand = _extract_brand_from_text(title)
+                if brand:
+                    _append_note(row, "brand inferred from title")
             color = _pick_cell(row, "color")
             if not color:
                 color = _extract_color_from_text(title)
+                if color:
+                    _append_note(row, "color inferred from title")
             rows.append(
                 InventoryRow(
                     sku=_pick_cell(row, "sku", "lot #", "lot#", "lot number", "lot"),
@@ -119,6 +139,8 @@ def load_input_rows(path: Path) -> list[InventoryRow]:
                     us_spec=_pick_cell(row, "us spec", "us_spec", "usspec"),
                     grade=_pick_cell(row, "grade"),
                     asin_hint=_pick_cell(row, "asin", "asin hint", "asinhint"),
+                    capacity_inferred_from_title=capacity_inferred_from_title,
+                    needs_input_capacity=not bool(capacity),
                     raw=row,
                 )
             )
@@ -150,6 +172,10 @@ def write_output_rows(path: Path, rows: list[ResolvedRow]) -> None:
         writer = csv.DictWriter(outfile, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
+            combined_notes = row.notes
+            inference_notes = (row.input_row.raw.get("_inference_notes") or "").strip()
+            if inference_notes:
+                combined_notes = f"{combined_notes}; {inference_notes}" if combined_notes else inference_notes
             writer.writerow(
                 {
                     "sku": row.input_row.sku,
@@ -168,7 +194,7 @@ def write_output_rows(path: Path, rows: list[ResolvedRow]) -> None:
                     "source": row.source,
                     "confidence": f"{row.confidence:.2f}",
                     "status": row.status,
-                    "notes": row.notes,
+                    "notes": combined_notes,
                     "library_hit": "yes" if row.library_hit else "no",
                 }
             )
@@ -210,6 +236,7 @@ def run_enrichment(config: ToolConfig, input_csv: Path, output_csv: Path) -> Pro
     keepa_resolved = sum(1 for row in enriched if row.source == "keepa+spapi")
     conflicts = sum(1 for row in enriched if row.status == "conflict")
     skipped = sum(1 for row in enriched if row.status == "skipped")
+    needs_input = sum(1 for row in enriched if row.status == "needs_input")
     return ProcessSummary(
         total_rows=total,
         resolved_rows=resolved,
@@ -218,5 +245,6 @@ def run_enrichment(config: ToolConfig, input_csv: Path, output_csv: Path) -> Pro
         keepa_resolved=keepa_resolved,
         conflicts=conflicts,
         skipped=skipped,
+        needs_input=needs_input,
     )
 
