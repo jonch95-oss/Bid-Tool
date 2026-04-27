@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from pathlib import Path
 
 from .asin_library import AsinLibrary
@@ -11,22 +12,48 @@ from .sp_api_client import SpApiClient
 from .types import InventoryRow, ProcessSummary, ResolvedRow
 
 
+def _normalize_header(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").strip().lower())
+
+
+def _pick_cell(row: dict[str, str], *aliases: str) -> str:
+    for alias in aliases:
+        normalized = _normalize_header(alias)
+        if normalized in row and row[normalized]:
+            return row[normalized].strip()
+    return ""
+
+
+def _extract_capacity_from_text(text: str) -> str:
+    # Examples matched: "128GB", "256 gb", "1TB", "1.5 TB"
+    match = re.search(r"\b(\d+(?:\.\d+)?)\s*(tb|gb)\b", text or "", flags=re.IGNORECASE)
+    if not match:
+        return ""
+    number = match.group(1)
+    unit = match.group(2).upper()
+    return f"{number}{unit}"
+
+
 def load_input_rows(path: Path) -> list[InventoryRow]:
     rows: list[InventoryRow] = []
     with path.open("r", encoding="utf-8", newline="") as infile:
         reader = csv.DictReader(infile)
         for raw in reader:
-            row = {k: (v or "") for k, v in raw.items()}
+            row = {_normalize_header(k or ""): (v or "") for k, v in raw.items()}
+            title = _pick_cell(row, "title", "item description", "item_description", "description")
+            capacity = _pick_cell(row, "capacity", "cpacity")
+            if not capacity:
+                capacity = _extract_capacity_from_text(title)
             rows.append(
                 InventoryRow(
-                    sku=row.get("sku", "").strip(),
-                    title=row.get("title", "").strip(),
-                    brand=row.get("brand", "").strip(),
-                    model=row.get("model", "").strip(),
-                    color=row.get("color", "").strip(),
-                    capacity=(row.get("capacity") or row.get("cpacity") or "").strip(),
-                    grade=row.get("grade", "").strip(),
-                    asin_hint=row.get("asin", "").strip(),
+                    sku=_pick_cell(row, "sku", "lot #", "lot#", "lot number", "lot"),
+                    title=title,
+                    brand=_pick_cell(row, "brand", "oem"),
+                    model=_pick_cell(row, "model"),
+                    color=_pick_cell(row, "color"),
+                    capacity=capacity,
+                    grade=_pick_cell(row, "grade"),
+                    asin_hint=_pick_cell(row, "asin", "asin hint", "asinhint"),
                     raw=row,
                 )
             )

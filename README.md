@@ -39,7 +39,7 @@ Optional:
 
 ### 3) Input CSV format
 
-Headers expected:
+Standard headers expected:
 
 ```csv
 sku,title,model,color,capacity,grade,asin
@@ -47,6 +47,20 @@ sku,title,model,color,capacity,grade,asin
 
 - `asin` is optional (hint only)
 - `title` is optional but highly recommended for better matching
+
+Supported real-world headers are also accepted and mapped automatically:
+
+- `Lot #` -> `sku`
+- `Qty` -> stored in raw row data (not required for matching)
+- `OEM` -> `brand`
+- `Model` -> `model`
+- `Item Description` -> `title`
+- `Grade` -> `grade`
+- `Capacity` -> `capacity`
+- `Color` -> `color`
+
+If `Capacity` is blank, the tool will try to extract it from `Item Description`
+(examples: `128GB`, `256 GB`, `1TB`).
 
 ### 4) Run enrichment
 
