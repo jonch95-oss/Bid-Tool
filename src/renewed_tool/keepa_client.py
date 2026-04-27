@@ -24,26 +24,33 @@ class KeepaClient:
 
     BASE_URL = "https://api.keepa.com"
 
+    @staticmethod
+    def _safe_limit(limit: int | None) -> int:
+        if limit is None:
+            return 20
+        try:
+            parsed = int(limit)
+        except (TypeError, ValueError):
+            return 20
+        return min(50, max(1, parsed))
+
     def search_candidates(self, query: str, domain: int = 1, limit: int = 30) -> list[KeepaCandidate]:
         query = query.strip()
         if not query:
             return []
+        safe_limit = self._safe_limit(limit)
 
         search_url = f"{self.BASE_URL}/search"
         search_params = {
             "key": self.api_key,
             "domain": domain,
+            "type": "product",
             "term": query,
             "asinsOnly": "1",
         }
         self._log_request("GET", search_url, search_params)
         resp = requests.get(search_url, params=search_params, timeout=self.timeout_seconds)
         LOGGER.warning("Keepa search response status=%s", resp.status_code)
-        if resp.status_code == 400 and "invalidParameter" in resp.text:
-            # Fallback to product finder query for accounts/plans where /search params differ.
-            LOGGER.warning("Keepa /search invalidParameter, falling back to /query product_finder path.")
-            asin_list = self._product_finder_search(query=query, domain=domain, limit=limit)
-            return self.get_candidates(asin_list, domain=domain)
         if resp.status_code != 200:
             raise KeepaClientError(f"Keepa search failed ({resp.status_code}): {resp.text[:300]}")
         payload = resp.json()
@@ -52,18 +59,22 @@ class KeepaClient:
             products = payload.get("products")
             if isinstance(products, list):
                 asin_list = [str(p.get("asin", "")).strip() for p in products if isinstance(p, dict)]
-        asin_list = [asin for asin in asin_list if asin][: max(limit, 1)]
+        asin_list = [asin for asin in asin_list if asin][:safe_limit]
         if not asin_list:
             return []
         return self.get_candidates(asin_list, domain=domain)
 
-    def _product_finder_search(self, query: str, domain: int, limit: int) -> list[str]:
+    def _product_finder_search(self, query: str, domain: int, limit: int | None) -> list[str]:
         query_url = f"{self.BASE_URL}/query"
         selection = {
             "title": query,
-            "perPage": max(limit, 1),
+            "perPage": 20,
             "page": 0,
         }
+        if limit is not None:
+            selection["perPage"] = self._safe_limit(limit)
+        safe_limit = self._safe_limit(selection["perPage"])
+        LOGGER.warning("Keepa product_finder selection: %s", json.dumps(selection))
         params = {
             "key": self.api_key,
             "domain": domain,
@@ -78,7 +89,7 @@ class KeepaClient:
             )
         payload = resp.json()
         asin_list = payload.get("asinList", [])
-        return [asin for asin in asin_list if asin][: max(limit, 1)]
+        return [asin for asin in asin_list if asin][:safe_limit]
 
     def get_candidates(self, asins: list[str], domain: int = 1) -> list[KeepaCandidate]:
         if not asins:
