@@ -25,6 +25,19 @@ class AsinResolver:
         self.candidate_limit = candidate_limit
 
     def enrich_row(self, row: InventoryRow) -> ResolvedRow:
+        # Avoid sending empty/noisy search queries to Keepa.
+        if not any(part.strip() for part in (row.model, row.title, row.brand)):
+            return ResolvedRow(
+                input_row=row,
+                resolved_asin="",
+                price=None,
+                currency=None,
+                source="input-validation",
+                confidence=0.0,
+                status="skipped",
+                notes="Skipped row: missing model/title/brand",
+            )
+
         key = self._lookup_key(row, self.marketplace_id)
         spec = ProductSpec(
             model=row.model,

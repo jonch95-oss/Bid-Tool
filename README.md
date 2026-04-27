@@ -158,3 +158,16 @@ ASIN_LIBRARY_PATH = "/tmp/asin_library.db"
 ```
 
 The Streamlit app reads credentials from `st.secrets` directly.
+
+## Keepa troubleshooting notes
+
+- The tool uses Keepa Product Search endpoint: `GET https://api.keepa.com/search`
+- Parameters sent are:
+  - `key` = your API key
+  - `domain` = marketplace domain id (`1` for amazon.com)
+  - `term` = free-text search query (for example `Samsung Galaxy A02s`)
+- For category searches, Keepa requires `type=category`, but product searches do **not**.
+- Detailed Keepa request logs are emitted from `renewed_tool.keepa_client` and include:
+  - endpoint URL
+  - request parameters (API key redacted)
+  - response status code and a short body preview on errors
