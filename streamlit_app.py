@@ -19,6 +19,7 @@ from renewed_tool.asin_library import AsinLibrary  # noqa: E402
 from renewed_tool.config import ToolConfig  # noqa: E402
 from renewed_tool.csv_pipeline import run_enrichment  # noqa: E402
 from renewed_tool.normalization import normalize_capacity, normalize_color, normalize_model, norm_text  # noqa: E402
+from renewed_tool.sp_api_client import SpApiClient  # noqa: E402
 from renewed_tool.types import LookupKey  # noqa: E402
 
 
@@ -33,6 +34,7 @@ REQUIRED_KEYS = [
 
 OPTIONAL_KEYS = [
     "AWS_SESSION_TOKEN",
+    "AWS_ROLE_ARN",
     "AWS_REGION",
     "SPAPI_MARKETPLACE_ID",
     "KEEPA_DOMAIN",
@@ -66,12 +68,79 @@ def build_config_from_secrets() -> ToolConfig:
         aws_access_key_id=_required_secret("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=_required_secret("AWS_SECRET_ACCESS_KEY"),
         aws_session_token=_secret_get("AWS_SESSION_TOKEN"),
+        aws_role_arn=_secret_get("AWS_ROLE_ARN"),
         lwa_client_id=_required_secret("LWA_CLIENT_ID"),
         lwa_client_secret=_required_secret("LWA_CLIENT_SECRET"),
         lwa_refresh_token=_required_secret("LWA_REFRESH_TOKEN"),
         db_path=Path(_secret_get("ASIN_LIBRARY_PATH", "/tmp/asin_library.db") or "/tmp/asin_library.db"),
         candidate_limit=int(_secret_get("CANDIDATE_LIMIT", "25") or "25"),
     )
+
+
+def _render_spapi_diagnostics(config: ToolConfig) -> None:
+    with st.expander("Diagnostics", expanded=False):
+        st.caption("Run targeted checks for SP-API authentication, permissions, and pricing endpoints.")
+        test_asin = st.text_input("Health check ASIN", value="B09G9HD6PD", key="spapi-health-asin")
+        if st.button("Run SP-API Health Check", key="run-spapi-health-check"):
+            client = SpApiClient(
+                aws_access_key_id=config.aws_access_key_id,
+                aws_secret_access_key=config.aws_secret_access_key,
+                aws_session_token=config.aws_session_token,
+                aws_role_arn=config.aws_role_arn,
+                lwa_client_id=config.lwa_client_id,
+                lwa_client_secret=config.lwa_client_secret,
+                lwa_refresh_token=config.lwa_refresh_token,
+                region=config.aws_region,
+                marketplace_id=config.spapi_marketplace_id,
+                endpoint_base=config.sp_api_base_url,
+            )
+            with st.spinner("Running SP-API diagnostics..."):
+                results = client.run_health_check(asin=(test_asin or "B09G9HD6PD").strip())
+
+            lwa = results.get("lwa", {})
+            if lwa.get("ok"):
+                st.success("✅ LWA token fetch succeeded")
+            else:
+                st.error(f"❌ LWA token fetch failed: {lwa.get('error', 'unknown error')}")
+
+            sts = results.get("sts", {})
+            if sts.get("ok"):
+                if results.get("auth_method") == "assume_role":
+                    st.success(f"✅ STS AssumeRole succeeded ({sts.get('role_arn', '')})")
+                else:
+                    st.info("✅ Using direct IAM user credentials (AWS_ROLE_ARN not set)")
+            else:
+                st.error(f"❌ STS AssumeRole failed: {sts.get('error', 'unknown error')}")
+
+            marketplaces = results.get("marketplaces", {})
+            if marketplaces.get("ok"):
+                items = marketplaces.get("items", [])
+                if items:
+                    st.write("Marketplace participations:")
+                    st.dataframe(items, use_container_width=True)
+                else:
+                    st.warning("Marketplace participation call succeeded but returned no marketplaces.")
+            else:
+                st.error(f"❌ Marketplace participation failed: {marketplaces.get('error', 'unknown error')}")
+
+            pricing = results.get("pricing", {})
+            if pricing.get("ok"):
+                version_results = pricing.get("versions", {})
+                st.write("Pricing endpoint checks:")
+                st.dataframe(
+                    [
+                        {
+                            "version": version_name,
+                            "worked": details.get("worked", False),
+                            "condition": details.get("condition", ""),
+                            "attempts": json.dumps(details.get("attempts", [])),
+                        }
+                        for version_name, details in version_results.items()
+                    ],
+                    use_container_width=True,
+                )
+            else:
+                st.error(f"❌ Pricing checks failed: {pricing.get('error', 'unknown error')}")
 
 
 def preview_csv_rows(content: bytes, limit: int = 10) -> list[dict[str, str]]:
@@ -96,6 +165,8 @@ def _library_key_from_fields(brand: str, model: str, color: str, storage: str, m
 
 
 def render_enrichment_page(config: ToolConfig) -> None:
+    _render_spapi_diagnostics(config)
+
     left, right = st.columns([2, 1])
     with left:
         uploaded_file = st.file_uploader("Upload inventory CSV", type=["csv"])
@@ -141,12 +212,13 @@ def render_enrichment_page(config: ToolConfig) -> None:
         output_bytes = output_path.read_bytes()
         progress.progress(100, text="Done")
         st.success("Enrichment complete.")
-        m1, m2, m3, m4, m5 = st.columns(5)
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
         m1.metric("Total rows", summary.total_rows)
         m2.metric("Resolved rows", summary.resolved_rows)
         m3.metric("Unresolved rows", summary.unresolved_rows)
         m4.metric("Library hits", summary.library_hits)
         m5.metric("Keepa fresh lookups", summary.keepa_resolved)
+        m6.metric("Needs input", summary.needs_input)
         if summary.conflicts:
             st.warning(f"Conflicts detected: {summary.conflicts}")
         if summary.skipped:
@@ -372,6 +444,7 @@ def main() -> None:
                 'LWA_REFRESH_TOKEN = "your_lwa_refresh_token"\n'
                 'AWS_ACCESS_KEY_ID = "your_aws_access_key"\n'
                 'AWS_SECRET_ACCESS_KEY = "your_aws_secret_key"\n'
+                'AWS_ROLE_ARN = "arn:aws:iam::123456789012:role/YourRole"  # optional\n'
                 'AWS_REGION = "us-east-1"\n'
                 'SPAPI_MARKETPLACE_ID = "ATVPDKIKX0DER"\n'
             )

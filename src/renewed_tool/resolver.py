@@ -41,6 +41,13 @@ class AsinResolver:
                 status="skipped",
                 notes="Skipped row: missing model/title/brand",
                 library_hit=False,
+                excellent_price=None,
+                good_price=None,
+                acceptable_price=None,
+                lowest_fba=None,
+                lowest_fbm=None,
+                buy_box=None,
+                total_offers=0,
             )
 
         key = self._lookup_key(row, self.marketplace_id)
@@ -122,6 +129,13 @@ class AsinResolver:
                 status="error",
                 notes=f"Keepa request failed: {exc}",
                 library_hit=False,
+                excellent_price=None,
+                good_price=None,
+                acceptable_price=None,
+                lowest_fba=None,
+                lowest_fbm=None,
+                buy_box=None,
+                total_offers=0,
             )
 
         if not keepa_candidates:
@@ -135,6 +149,13 @@ class AsinResolver:
                 status="unresolved",
                 notes="No Keepa candidates found",
                 library_hit=False,
+                excellent_price=None,
+                good_price=None,
+                acceptable_price=None,
+                lowest_fba=None,
+                lowest_fbm=None,
+                buy_box=None,
+                total_offers=0,
             )
 
         best: ResolvedRow | None = None
@@ -166,6 +187,13 @@ class AsinResolver:
                 status="unresolved",
                 notes="No candidate passed model/color/capacity/grade validation",
                 library_hit=False,
+                excellent_price=None,
+                good_price=None,
+                acceptable_price=None,
+                lowest_fba=None,
+                lowest_fbm=None,
+                buy_box=None,
+                total_offers=0,
             )
 
         upsert_result = self.asin_library.upsert_auto(
@@ -195,6 +223,13 @@ class AsinResolver:
                     f"Keepa returned ASIN {best.resolved_asin}"
                 ),
                 library_hit=False,
+                excellent_price=best.excellent_price,
+                good_price=best.good_price,
+                acceptable_price=best.acceptable_price,
+                lowest_fba=best.lowest_fba,
+                lowest_fbm=best.lowest_fbm,
+                buy_box=best.buy_box,
+                total_offers=best.total_offers,
             )
         return best
 
@@ -209,6 +244,17 @@ class AsinResolver:
     ) -> ResolvedRow:
         catalog = self.sp_api_client.get_catalog_item(asin)
         pricing = self.sp_api_client.get_pricing(asin)
+        requested_grade_tier = self._requested_grade_tier(normalize_grade(spec.grade))
+        grade_matched_price = self._price_for_grade_tier(pricing, requested_grade_tier)
+        price_choice = (
+            grade_matched_price
+            or pricing.buy_box
+            or pricing.lowest_fba
+            or pricing.lowest_fbm
+            or pricing.excellent_price
+            or pricing.good_price
+            or pricing.acceptable_price
+        )
         match = self._validate(spec, catalog.model, catalog.color, catalog.capacity, pricing)
 
         merged_reason = match.reason
@@ -219,25 +265,39 @@ class AsinResolver:
             return ResolvedRow(
                 input_row=row,
                 resolved_asin=asin,
-                price=pricing.amount,
+                price=price_choice,
                 currency=pricing.currency,
                 source=source,
                 confidence=0.0,
                 status="unresolved",
                 notes=merged_reason,
                 library_hit=library_hit,
+                excellent_price=pricing.excellent_price,
+                good_price=pricing.good_price,
+                acceptable_price=pricing.acceptable_price,
+                lowest_fba=pricing.lowest_fba,
+                lowest_fbm=pricing.lowest_fbm,
+                buy_box=pricing.buy_box,
+                total_offers=pricing.total_offers,
             )
 
         return ResolvedRow(
             input_row=row,
             resolved_asin=asin,
-            price=pricing.amount,
+            price=price_choice,
             currency=pricing.currency,
             source=source,
             confidence=match.score,
             status="ok",
             notes=merged_reason,
             library_hit=library_hit,
+            excellent_price=pricing.excellent_price,
+            good_price=pricing.good_price,
+            acceptable_price=pricing.acceptable_price,
+            lowest_fba=pricing.lowest_fba,
+            lowest_fbm=pricing.lowest_fbm,
+            buy_box=pricing.buy_box,
+            total_offers=pricing.total_offers,
         )
 
     @staticmethod
@@ -316,10 +376,41 @@ class AsinResolver:
             reasons.append("capacity not verified")
 
         if req_grade:
-            if offer_grade and req_grade != offer_grade:
+            requested_tier = AsinResolver._requested_grade_tier(req_grade)
+            grade_tier_price = AsinResolver._price_for_grade_tier(pricing, requested_tier)
+            has_any_tier = any(
+                value is not None
+                for value in (
+                    pricing.excellent_price,
+                    pricing.good_price,
+                    pricing.acceptable_price,
+                )
+            )
+
+            if requested_tier and grade_tier_price is not None:
+                score += 0.1
+                reasons.append(f"grade matched ({requested_tier})")
+            elif requested_tier and has_any_tier:
+                LOGGER.warning(
+                    "Validation failed field=grade expected=%s tier=%s available=(excellent=%s,good=%s,acceptable=%s)",
+                    req_grade,
+                    requested_tier,
+                    pricing.excellent_price,
+                    pricing.good_price,
+                    pricing.acceptable_price,
+                )
+                return MatchResult(
+                    False,
+                    0.0,
+                    (
+                        "Grade mismatch: expected "
+                        f"'{req_grade}' ({requested_tier}) but matching offer tier was not available"
+                    ),
+                )
+            elif offer_grade and req_grade != offer_grade:
                 LOGGER.warning("Validation failed field=grade expected=%s actual=%s", req_grade, offer_grade)
                 return MatchResult(False, 0.0, f"Grade mismatch: expected '{req_grade}', got '{offer_grade}'")
-            if offer_grade:
+            elif offer_grade:
                 score += 0.1
                 reasons.append("grade matched")
             else:
@@ -338,3 +429,22 @@ class AsinResolver:
         if title_boost:
             reason += ", exact model text boost"
         return MatchResult(True, final, reason)
+
+    @staticmethod
+    def _requested_grade_tier(normalized_grade: str) -> str | None:
+        return {
+            "A": "excellent",
+            "B": "excellent",
+            "C": "good",
+            "D": "acceptable",
+        }.get(normalized_grade)
+
+    @staticmethod
+    def _price_for_grade_tier(pricing: PriceSnapshot, grade_tier: str | None) -> float | None:
+        if grade_tier == "excellent":
+            return pricing.excellent_price
+        if grade_tier == "good":
+            return pricing.good_price
+        if grade_tier == "acceptable":
+            return pricing.acceptable_price
+        return None

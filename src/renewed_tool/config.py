@@ -14,6 +14,7 @@ class ToolConfig:
     aws_access_key_id: str
     aws_secret_access_key: str
     aws_session_token: str | None
+    aws_role_arn: str | None
     lwa_client_id: str
     lwa_client_secret: str
     lwa_refresh_token: str
@@ -53,6 +54,7 @@ def load_config() -> ToolConfig:
         aws_access_key_id=_required("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=_required("AWS_SECRET_ACCESS_KEY"),
         aws_session_token=os.getenv("AWS_SESSION_TOKEN"),
+        aws_role_arn=os.getenv("AWS_ROLE_ARN"),
         lwa_client_id=_required("LWA_CLIENT_ID"),
         lwa_client_secret=_required("LWA_CLIENT_SECRET"),
         lwa_refresh_token=_required("LWA_REFRESH_TOKEN"),

@@ -32,6 +32,7 @@ Required:
 Optional:
 
 - `AWS_SESSION_TOKEN` (if using temporary credentials)
+- `AWS_ROLE_ARN` (optional STS role to assume before SP-API requests)
 - `AWS_REGION` (default: `us-east-1`)
 - `SPAPI_MARKETPLACE_ID` (default: `ATVPDKIKX0DER`)
 - `KEEPA_DOMAIN` (default: `1` for US)
@@ -84,6 +85,7 @@ The output CSV contains:
 
 - resolved ASIN
 - price + currency
+- grade-tier/offer pricing (`excellent_price`, `good_price`, `acceptable_price`, `lowest_fba`, `lowest_fbm`, `buy_box`, `total_offers`)
 - match source (`library` or `keepa+spapi`)
 - match score
 - status + explanation
@@ -158,6 +160,7 @@ Optional secrets:
 
 ```toml
 AWS_SESSION_TOKEN = "..."
+AWS_ROLE_ARN = "arn:aws:iam::123456789012:role/YourRole"
 AWS_REGION = "us-east-1"
 SPAPI_MARKETPLACE_ID = "ATVPDKIKX0DER"
 KEEPA_DOMAIN = "1"
@@ -166,6 +169,13 @@ ASIN_LIBRARY_PATH = "/tmp/asin_library.db"
 ```
 
 The Streamlit app reads credentials from `st.secrets` directly.
+
+Use the **Diagnostics** expander on the Enrichment tab to run the built-in SP-API health check:
+
+- LWA token test
+- STS AssumeRole test (if `AWS_ROLE_ARN` is configured)
+- sellers marketplace participations call
+- pricing version probe for a test ASIN
 
 ## ASIN Library behavior
 

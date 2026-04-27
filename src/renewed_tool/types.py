@@ -63,7 +63,13 @@ class CatalogSnapshot:
 @dataclass(slots=True)
 class PriceSnapshot:
     asin: str
-    amount: float | None
+    excellent_price: float | None
+    good_price: float | None
+    acceptable_price: float | None
+    lowest_fba: float | None
+    lowest_fbm: float | None
+    buy_box: float | None
+    total_offers: int
     currency: str | None
     condition: str | None
     raw: dict[str, Any]
@@ -117,6 +123,13 @@ class ResolvedRow:
     status: str
     notes: str
     library_hit: bool
+    excellent_price: float | None = None
+    good_price: float | None = None
+    acceptable_price: float | None = None
+    lowest_fba: float | None = None
+    lowest_fbm: float | None = None
+    buy_box: float | None = None
+    total_offers: int = 0
 
 
 @dataclass(slots=True)
@@ -128,3 +141,4 @@ class ProcessSummary:
     keepa_resolved: int
     skipped: int
     conflicts: int
+    needs_input: int = 0
