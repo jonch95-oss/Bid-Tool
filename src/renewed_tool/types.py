@@ -84,9 +84,10 @@ class AsinLibraryRecord:
     confidence: float
     source: str
     locked: bool
-    raw_title: str
-    created_at: str
-    updated_at: str
+    raw_title: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    id: int | None = None
 
 
 @dataclass(slots=True)

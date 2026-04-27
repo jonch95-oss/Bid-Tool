@@ -81,6 +81,7 @@ def write_output_rows(path: Path, rows: list[ResolvedRow]) -> None:
         "confidence",
         "status",
         "notes",
+        "library_hit",
     ]
     with path.open("w", encoding="utf-8", newline="") as outfile:
         writer = csv.DictWriter(outfile, fieldnames=fieldnames)
