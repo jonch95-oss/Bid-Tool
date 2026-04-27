@@ -57,6 +57,15 @@ renewed-tool enrich \
   --summary-json ./summary.json
 ```
 
+If the `renewed-tool` command is not on your PATH, run:
+
+```bash
+python3 -m renewed_tool.cli enrich \
+  --input ./input.csv \
+  --output ./output.csv \
+  --summary-json ./summary.json
+```
+
 The output CSV contains:
 
 - resolved ASIN
